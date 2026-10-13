@@ -1,4 +1,6 @@
 const STORAGE_KEY = "experience-reflection-recorder-v1";
+const CLOUD_TABLE = "experience_records";
+const CLOUD_SAVE_DELAY = 900;
 
 const DEFAULT_GROUPS = [
   { id: "algorithm", label: "算法", exportName: "Algorithm", color: "#9bb7d4", locked: true },
@@ -46,6 +48,10 @@ let state = loadState();
 let activeGroup = "all";
 let activeProject = "all";
 let selectedIds = new Set();
+let cloudClient = null;
+let cloudUser = null;
+let cloudSaveTimer = null;
+let isApplyingCloudState = false;
 
 const els = {};
 
@@ -53,6 +59,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindElements();
   bindEvents();
   renderAll();
+  initCloudSync();
 
   if (state.settings.openCardOnLaunch) {
     window.setTimeout(() => openEntryModal(), 220);
@@ -64,6 +71,7 @@ function bindElements() {
     "launchToggle", "newEntryBtn", "manageGroupsBtn", "groupFilters", "projectCount", "projectFilters", "searchInput", "sortSelect",
     "selectVisibleBtn", "clearSelectionBtn", "activeContext", "entryList",
     "selectionInfo", "exportTxtBtn", "exportPdfBtn", "backupBtn", "importInput",
+    "cloudStatus", "cloudEmail", "cloudSignInBtn", "cloudSyncBtn", "cloudSignOutBtn", "cloudMessage",
     "summaryBtn", "summaryOutput", "copySummaryBtn", "entryModal", "entryForm",
     "entryModalTitle", "entryId", "entryProject", "entryProjectQuick", "entryGroup", "entryTime",
     "entryProblem", "entryCause", "entrySolution", "entryTakeaway", "closeEntryModal", "cancelEntryBtn",
@@ -110,6 +118,9 @@ function bindEvents() {
   els.exportPdfBtn.addEventListener("click", exportPdf);
   els.backupBtn.addEventListener("click", backupJson);
   els.importInput.addEventListener("change", importJson);
+  els.cloudSignInBtn.addEventListener("click", sendCloudLoginLink);
+  els.cloudSyncBtn.addEventListener("click", syncCloudNow);
+  els.cloudSignOutBtn.addEventListener("click", signOutCloud);
 
   els.summaryBtn.addEventListener("click", generateSmartSummary);
   els.copySummaryBtn.addEventListener("click", copySummary);
@@ -206,6 +217,198 @@ function migrateEntries(entries) {
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (!isApplyingCloudState) queueCloudSave();
+}
+
+function getCloudConfig() {
+  return window.EXPERIENCE_RECORDER_CLOUD || {};
+}
+
+function isCloudConfigured() {
+  const config = getCloudConfig();
+  return Boolean(config.enabled && config.supabaseUrl && config.supabaseAnonKey && window.supabase);
+}
+
+async function initCloudSync() {
+  renderCloudPanel("Checking");
+
+  if (!isCloudConfigured()) {
+    renderCloudPanel("Local only", "Cloud sync is not configured yet.");
+    return;
+  }
+
+  const config = getCloudConfig();
+  cloudClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+
+  const { data } = await cloudClient.auth.getSession();
+  cloudUser = data.session?.user || null;
+
+  cloudClient.auth.onAuthStateChange((_event, session) => {
+    cloudUser = session?.user || null;
+    renderCloudPanel();
+    if (cloudUser) pullCloudState(true);
+  });
+
+  renderCloudPanel();
+  if (cloudUser) await pullCloudState(true);
+}
+
+function renderCloudPanel(statusText, messageText) {
+  if (!els.cloudStatus) return;
+
+  const configured = isCloudConfigured();
+  const signedIn = Boolean(cloudUser);
+  els.cloudStatus.textContent = statusText || (signedIn ? "Synced" : configured ? "Ready" : "Local");
+  els.cloudEmail.disabled = !configured || signedIn;
+  els.cloudSignInBtn.hidden = signedIn;
+  els.cloudSignInBtn.disabled = !configured;
+  els.cloudSyncBtn.disabled = !configured || !signedIn;
+  els.cloudSignOutBtn.hidden = !signedIn;
+
+  if (cloudUser?.email) {
+    els.cloudEmail.value = cloudUser.email;
+  }
+
+  els.cloudMessage.textContent = messageText || (
+    signedIn
+      ? `Signed in as ${cloudUser.email || "this user"}. Records sync automatically.`
+      : configured
+        ? "Enter your email to receive a Supabase login link."
+        : "Cloud sync is optional. Configure Supabase to enable it."
+  );
+}
+
+async function sendCloudLoginLink() {
+  if (!cloudClient) return;
+  const email = els.cloudEmail.value.trim();
+  if (!email) {
+    renderCloudPanel("Ready", "Enter an email address first.");
+    return;
+  }
+
+  renderCloudPanel("Sending", "Sending login link...");
+  const { error } = await cloudClient.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: window.location.href.split("#")[0]
+    }
+  });
+
+  if (error) {
+    renderCloudPanel("Error", error.message);
+    return;
+  }
+
+  renderCloudPanel("Email sent", "Open the login link from your email, then return to this page.");
+}
+
+async function signOutCloud() {
+  if (!cloudClient) return;
+  await cloudClient.auth.signOut();
+  cloudUser = null;
+  renderCloudPanel("Signed out", "Local records remain on this browser.");
+}
+
+async function syncCloudNow() {
+  if (!cloudClient || !cloudUser) return;
+  renderCloudPanel("Syncing", "Merging local and cloud records...");
+  await pullCloudState(true);
+  await pushCloudState();
+}
+
+function queueCloudSave() {
+  if (!cloudClient || !cloudUser) return;
+  window.clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = window.setTimeout(pushCloudState, CLOUD_SAVE_DELAY);
+}
+
+async function pullCloudState(mergeLocal) {
+  if (!cloudClient || !cloudUser) return;
+
+  const { data, error } = await cloudClient
+    .from(CLOUD_TABLE)
+    .select("data, updated_at")
+    .eq("user_id", cloudUser.id)
+    .maybeSingle();
+
+  if (error) {
+    renderCloudPanel("Error", error.message);
+    return;
+  }
+
+  if (!data?.data) {
+    await pushCloudState();
+    return;
+  }
+
+  const remoteState = normalizeCloudState(data.data);
+  isApplyingCloudState = true;
+  state = mergeLocal ? mergeStates(state, remoteState) : remoteState;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  isApplyingCloudState = false;
+  selectedIds.clear();
+  renderAll();
+  renderCloudPanel("Synced", `Last cloud update: ${formatDate(data.updated_at)}.`);
+}
+
+async function pushCloudState() {
+  if (!cloudClient || !cloudUser) return;
+
+  const { error } = await cloudClient
+    .from(CLOUD_TABLE)
+    .upsert({
+      user_id: cloudUser.id,
+      data: state,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "user_id" });
+
+  if (error) {
+    renderCloudPanel("Error", error.message);
+    return;
+  }
+
+  renderCloudPanel("Synced", `Synced at ${formatDate(new Date().toISOString())}.`);
+}
+
+function normalizeCloudState(value) {
+  if (!value || !Array.isArray(value.entries)) return loadState();
+  return {
+    groups: normalizeGroups(value.groups),
+    entries: migrateEntries(value.entries),
+    settings: {
+      openCardOnLaunch: true,
+      lastGroupId: "algorithm",
+      ...(value.settings || {})
+    }
+  };
+}
+
+function mergeStates(localState, remoteState) {
+  const groupsById = new Map();
+  normalizeGroups(remoteState.groups).forEach((group) => groupsById.set(group.id, group));
+  normalizeGroups(localState.groups).forEach((group) => groupsById.set(group.id, group));
+
+  const entriesById = new Map();
+  migrateEntries(remoteState.entries).forEach((entry) => entriesById.set(entry.id, entry));
+  migrateEntries(localState.entries).forEach((entry) => {
+    const existing = entriesById.get(entry.id);
+    if (!existing || getEntryTimestamp(entry) >= getEntryTimestamp(existing)) {
+      entriesById.set(entry.id, entry);
+    }
+  });
+
+  return {
+    groups: [...groupsById.values()],
+    entries: [...entriesById.values()].sort((a, b) => getEntryTimestamp(b) - getEntryTimestamp(a)),
+    settings: {
+      ...(remoteState.settings || {}),
+      ...(localState.settings || {})
+    }
+  };
+}
+
+function getEntryTimestamp(entry) {
+  return new Date(entry.updatedAt || entry.createdAt || 0).getTime();
 }
 
 function renderAll() {

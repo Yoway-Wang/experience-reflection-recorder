@@ -64,6 +64,20 @@
         <aside class="rightbar" aria-label="Export and summary">
           <section class="panel">
             <div class="panel-heading">
+              <h2>Cloud Sync</h2>
+              <span id="cloudStatus" class="count-pill">Local</span>
+            </div>
+            <div class="sync-panel">
+              <input id="cloudEmail" class="sync-input" type="email" autocomplete="email" placeholder="Email for cloud sync" />
+              <button id="cloudSignInBtn" class="button primary full" type="button">Send Login Link</button>
+              <button id="cloudSyncBtn" class="button full" type="button">Sync Now</button>
+              <button id="cloudSignOutBtn" class="button subtle full" type="button" hidden>Sign Out</button>
+              <p id="cloudMessage" class="sync-message">Cloud sync is optional. Configure Supabase to enable it.</p>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
               <h2>Export</h2>
               <span id="selectionInfo" class="count-pill">0 selected</span>
             </div>
@@ -171,6 +185,8 @@
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="cloud-config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

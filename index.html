@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Experience Reflection Recorder</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="title-block">
+          <p class="eyebrow">Essay note card</p>
+          <h1>A Summary of Experience and Reflections</h1>
+          <p class="subtitle">Problem · Cause · Solution · Takeaway</p>
+        </div>
+        <div class="top-actions">
+          <label class="toggle-line" title="打开应用时自动弹出记录卡片">
+            <input id="launchToggle" type="checkbox" />
+            <span>启动卡片</span>
+          </label>
+          <button id="newEntryBtn" class="button primary" type="button">New Entry</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="sidebar" aria-label="Groups and projects">
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>Groups</h2>
+              <button id="manageGroupsBtn" class="button subtle" type="button">Manage</button>
+            </div>
+            <div id="groupFilters" class="group-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>Projects</h2>
+              <span id="projectCount" class="count-pill">0</span>
+            </div>
+            <div id="projectFilters" class="group-list"></div>
+          </section>
+        </aside>
+
+        <section class="workspace" aria-label="Reflection entries">
+          <div class="toolbar">
+            <input id="searchInput" class="search-input" type="search" placeholder="Search project, problem, solution, time..." />
+            <select id="sortSelect" class="select">
+              <option value="updatedDesc">Recently updated</option>
+              <option value="createdDesc">Newest first</option>
+              <option value="createdAsc">Oldest first</option>
+              <option value="group">By group</option>
+              <option value="project">By project</option>
+              <option value="timeAsc">Time shortest</option>
+              <option value="timeDesc">Time longest</option>
+            </select>
+            <button id="selectVisibleBtn" class="button" type="button">Select Visible</button>
+            <button id="clearSelectionBtn" class="button" type="button">Clear</button>
+          </div>
+          <div id="activeContext" class="context-line"></div>
+          <div id="entryList" class="entry-list"></div>
+        </section>
+
+        <aside class="rightbar" aria-label="Export and summary">
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>Export</h2>
+              <span id="selectionInfo" class="count-pill">0 selected</span>
+            </div>
+            <div class="button-stack">
+              <button id="exportTxtBtn" class="button primary" type="button">Export TXT</button>
+              <button id="exportPdfBtn" class="button" type="button">Export PDF</button>
+              <button id="backupBtn" class="button" type="button">Backup JSON</button>
+              <label class="button file-button">
+                Import JSON
+                <input id="importInput" type="file" accept="application/json,.json" />
+              </label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>Smart Summary</h2>
+              <button id="summaryBtn" class="button subtle" type="button">Generate</button>
+            </div>
+            <textarea id="summaryOutput" class="summary-box" readonly placeholder="Generate a concise English summary from selected or filtered entries."></textarea>
+            <button id="copySummaryBtn" class="button full" type="button">Copy Summary</button>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <div id="entryModal" class="modal" hidden>
+      <div class="modal-card editor-card" role="dialog" aria-modal="true" aria-labelledby="entryModalTitle">
+        <div class="modal-heading">
+          <div>
+            <p class="eyebrow">Quick reflection card</p>
+            <h2 id="entryModalTitle">New Entry</h2>
+          </div>
+          <button id="closeEntryModal" class="icon-button" type="button" aria-label="Close">×</button>
+        </div>
+        <form id="entryForm" class="entry-form">
+          <input id="entryId" type="hidden" />
+          <div class="form-grid">
+            <label>
+              <span>Project</span>
+              <div class="project-input-row">
+                <input id="entryProject" type="text" placeholder="e.g. Robot arm prototype" />
+                <select id="entryProjectQuick" aria-label="Quick fill project">
+                  <option value="">Existing project</option>
+                </select>
+              </div>
+            </label>
+            <label>
+              <span>Group</span>
+              <select id="entryGroup"></select>
+            </label>
+            <label>
+              <span>Time</span>
+              <input id="entryTime" type="text" placeholder="e.g. 45m, 2h, 1.5h" />
+            </label>
+          </div>
+          <label>
+            <span>Problem</span>
+            <textarea id="entryProblem" required placeholder="What problem did I meet?"></textarea>
+          </label>
+          <label>
+            <span>Cause</span>
+            <textarea id="entryCause" placeholder="Why did it happen?"></textarea>
+          </label>
+          <label>
+            <span>Solution</span>
+            <textarea id="entrySolution" placeholder="How did I solve it?"></textarea>
+          </label>
+          <label>
+            <span>Takeaway</span>
+            <textarea id="entryTakeaway" placeholder="What did I learn from it?"></textarea>
+          </label>
+          <div class="modal-actions">
+            <button id="deleteEntryBtn" class="button danger" type="button" hidden>Delete</button>
+            <div class="spacer"></div>
+            <button class="button" type="button" id="cancelEntryBtn">Cancel</button>
+            <button class="button primary" type="submit">Save Entry</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="groupModal" class="modal" hidden>
+      <div class="modal-card group-card" role="dialog" aria-modal="true" aria-labelledby="groupModalTitle">
+        <div class="modal-heading">
+          <div>
+            <p class="eyebrow">Editable groups</p>
+            <h2 id="groupModalTitle">Manage Groups</h2>
+          </div>
+          <button id="closeGroupModal" class="icon-button" type="button" aria-label="Close">×</button>
+        </div>
+        <div id="groupEditorList" class="group-editor-list"></div>
+        <form id="addGroupForm" class="add-group-form">
+          <input id="newGroupLabel" type="text" placeholder="中文标签，如：测试" />
+          <input id="newGroupExport" type="text" placeholder="English heading, e.g. Testing" />
+          <input id="newGroupColor" type="color" value="#eceaf2" aria-label="Group color" />
+          <select id="newGroupPreset" aria-label="Color preset"></select>
+          <button class="button primary" type="submit">Add Group</button>
+        </form>
+        <div class="modal-actions">
+          <button id="resetGroupsBtn" class="button subtle" type="button">Reset Defaults</button>
+          <div class="spacer"></div>
+          <button id="saveGroupsBtn" class="button primary" type="button">Save Changes</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
